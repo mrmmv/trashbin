@@ -1,0 +1,100 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>ESP32-CAM Image Classification</title>
+    <!-- Load TensorFlow.js and Teachable Machine model -->
+    <script src="https://cdn.jsdelivr.net/npm/@tensorflow/tfjs"></script>
+    <script src="https://cdn.jsdelivr.net/npm/@teachablemachine/image"></script>
+</head>
+<body>
+    <h1>ESP32-CAM Image Classification</h1>
+    <img id="capturedImage" src="" alt="Captured Image" style="display:none;">
+    <p id="classificationResult"></p>
+
+    <script>
+        const capturedImage = document.getElementById('capturedImage');
+        const classificationResult = document.getElementById('classificationResult');
+
+        // Load Teachable Machine model
+        let model;
+        const modelURL = "https://teachablemachine.withgoogle.com/models/yHcLau4msj/"; // Replace with your model URL
+        const metadataURL = modelURL + "metadata.json";
+
+        async function loadModel() {
+            // Check if the Teachable Machine library is loaded
+            if (typeof tmImage === 'undefined') {
+                console.error("Teachable Machine library not loaded!");
+                return;
+            }
+            model = await tmImage.load(modelURL, metadataURL);
+            console.log("Model loaded!");
+        }
+
+        // Function to capture image, classify, and send result to ESP32-CAM
+        async function captureAndClassify() {
+            try {
+                // Capture image from ESP32-CAM
+                const imageResponse = await fetch('http://192.168.1.13/capture');
+                const imageBlob = await imageResponse.blob();
+                const imageUrl = URL.createObjectURL(imageBlob);
+                capturedImage.src = imageUrl;
+                capturedImage.style.display = 'block';
+
+                // Wait for the image to load
+                await new Promise((resolve) => {
+                    capturedImage.onload = resolve;
+                });
+
+                // Classify the image using Teachable Machine
+                const prediction = await model.predict(capturedImage);
+
+                // Find the highest probability prediction
+                let highestProbability = 0;
+                let highestClass = "";
+
+                for (let i = 0; i < prediction.length; i++) {
+                    if (prediction[i].probability > highestProbability) {
+                        highestProbability = prediction[i].probability;
+                        highestClass = prediction[i].className;
+                    }
+                }
+
+                // Display classification result
+                classificationResult.textContent = `Classification: ${highestClass} (Confidence: ${highestProbability.toFixed(2)})`;
+
+                // Send classification result back to ESP32-CAM
+                await sendClassificationToESP32(highestClass);
+
+            } catch (error) {
+                console.error('Error:', error);
+            }
+        }
+
+        // Function to send the classification to the ESP32-CAM
+        async function sendClassificationToESP32(classification) {
+            const esp32camIP = "192.168.1.13"; // Replace with your ESP32-CAM's IP address
+            const url = `http://${esp32camIP}/setPins?class=${classification}`;
+
+            try {
+                const response = await fetch(url, { method: 'GET' });
+                if (!response.ok) {
+                    console.error("Failed to send classification to ESP32-CAM");
+                }
+            } catch (error) {
+                console.error("Error sending classification to ESP32-CAM:", error);
+            }
+        }
+
+        // Load the model and start continuous classification
+        async function startContinuousClassification() {
+            await loadModel();
+            setInterval(captureAndClassify, 1000); // Run every 1 second
+        }
+
+        // Start the process when the page loads
+        startContinuousClassification();
+    </script>
+</body>
+</html>
